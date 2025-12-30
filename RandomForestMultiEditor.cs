@@ -65,6 +65,9 @@ public class RandomForestMultiEditor : EditorWindow
     // Forest generation area
     public Vector2 forestSize = new Vector2(500, 500);
     public Terrain targetTerrain;
+    
+    // Center point options
+    public bool useSelectedObject = false;
 
     private GameObject forestParent;
     private Vector2 scrollPos;
@@ -94,12 +97,72 @@ public class RandomForestMultiEditor : EditorWindow
         }
     }
 
+    void OnEnable()
+    {
+        SceneView.onSceneGUIDelegate += OnSceneGUI;
+    }
+
+    void OnDisable()
+    {
+        SceneView.onSceneGUIDelegate -= OnSceneGUI;
+    }
+
+    void OnSceneGUI(SceneView sceneView)
+    {
+        if (targetTerrain == null) return;
+
+        Vector3 generationCenter;
+        if (useSelectedObject && Selection.activeGameObject != null)
+        {
+            generationCenter = Selection.activeGameObject.transform.position;
+        }
+        else
+        {
+            generationCenter = targetTerrain.transform.position + new Vector3(targetTerrain.terrainData.size.x/2f, 0, targetTerrain.terrainData.size.z/2f);
+        }
+
+        // Sample terrain height at center and adjust Y position
+        float terrainHeight = targetTerrain.SampleHeight(generationCenter) + targetTerrain.transform.position.y;
+        generationCenter.y = terrainHeight;
+
+        // Draw wireframe box showing generation area
+        Handles.color = Color.yellow;
+        Vector3 size = new Vector3(forestSize.x, 100f, forestSize.y);
+        Handles.DrawWireCube(generationCenter, size);
+
+        // Draw corner markers
+        float halfX = forestSize.x / 2f;
+        float halfZ = forestSize.y / 2f;
+        Handles.color = Color.red;
+        Handles.SphereHandleCap(0, generationCenter + new Vector3(halfX, 0, halfZ), Quaternion.identity, 5f, EventType.Repaint);
+        Handles.SphereHandleCap(0, generationCenter + new Vector3(-halfX, 0, halfZ), Quaternion.identity, 5f, EventType.Repaint);
+        Handles.SphereHandleCap(0, generationCenter + new Vector3(halfX, 0, -halfZ), Quaternion.identity, 5f, EventType.Repaint);
+        Handles.SphereHandleCap(0, generationCenter + new Vector3(-halfX, 0, -halfZ), Quaternion.identity, 5f, EventType.Repaint);
+
+        // Draw label
+        Handles.Label(generationCenter + new Vector3(0, 50f, 0), "Forest Generation Area\n" + forestSize.x + " x " + forestSize.y);
+    }
+
     void OnGUI()
     {
         scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
 
         targetTerrain = (Terrain)EditorGUILayout.ObjectField("Target Terrain", targetTerrain, typeof(Terrain), true);
         forestSize = EditorGUILayout.Vector2Field("Forest Size (X,Z)", forestSize);
+        
+        EditorGUILayout.Space();
+        useSelectedObject = EditorGUILayout.Toggle("Use Selected Object as Center", useSelectedObject);
+        if (useSelectedObject)
+        {
+            if (Selection.activeGameObject != null)
+            {
+                EditorGUILayout.HelpBox("Center: " + Selection.activeGameObject.name + " at " + Selection.activeGameObject.transform.position, MessageType.Info);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("No object selected. Will use terrain center.", MessageType.Warning);
+            }
+        }
 
         EditorGUILayout.Space();
         GUILayout.Label("=== Tree 1 ===", EditorStyles.boldLabel);
@@ -173,10 +236,9 @@ public class RandomForestMultiEditor : EditorWindow
             return;
         }
 
-        if (forestParent == null)
-        {
-            forestParent = new GameObject("Generated Forest");
-        }
+        // Always create a new parent object with timestamp
+        string timestamp = System.DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss");
+        forestParent = new GameObject("Generated Forest " + timestamp);
 
         List<TreeData> trees = new List<TreeData>();
         trees.Add(new TreeData(tree1, treeCount1, minScale1, maxScale1, maxSlope1, slopeDensityFade1, tree1LeafColor, tree1AlphaCutoff));
@@ -185,7 +247,15 @@ public class RandomForestMultiEditor : EditorWindow
         trees.Add(new TreeData(tree4, treeCount4, minScale4, maxScale4, maxSlope4, slopeDensityFade4, tree4LeafColor, tree4AlphaCutoff));
         trees.Add(new TreeData(tree5, treeCount5, minScale5, maxScale5, maxSlope5, slopeDensityFade5, tree5LeafColor, tree5AlphaCutoff));
 
-        Vector3 terrainCenter = targetTerrain.transform.position + new Vector3(targetTerrain.terrainData.size.x/2f, 0, targetTerrain.terrainData.size.z/2f);
+        Vector3 generationCenter;
+        if (useSelectedObject && Selection.activeGameObject != null)
+        {
+            generationCenter = Selection.activeGameObject.transform.position;
+        }
+        else
+        {
+            generationCenter = targetTerrain.transform.position + new Vector3(targetTerrain.terrainData.size.x/2f, 0, targetTerrain.terrainData.size.z/2f);
+        }
 
         foreach (TreeData treeData in trees)
         {
@@ -202,7 +272,7 @@ public class RandomForestMultiEditor : EditorWindow
                 attempts++;
                 float x = Random.Range(-forestSize.x/2f, forestSize.x/2f);
                 float z = Random.Range(-forestSize.y/2f, forestSize.y/2f);
-                Vector3 pos = terrainCenter + new Vector3(x, 0, z);
+                Vector3 pos = generationCenter + new Vector3(x, 0, z);
 
                 float terrainHeight = targetTerrain.SampleHeight(pos) + targetTerrain.transform.position.y;
                 pos.y = terrainHeight;
@@ -260,8 +330,6 @@ public class RandomForestMultiEditor : EditorWindow
                         {
                             // Create a new material instance
                             Material newMat = new Material(sharedMats[i]);
-
-							Debug.Log("Material: " + newMat.name + " | Shader: " + newMat.shader.name);
                             
                             // Try multiple common color properties
                             if (newMat.HasProperty("_Color"))
