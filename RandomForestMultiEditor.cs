@@ -56,11 +56,11 @@ public class RandomForestMultiEditor : EditorWindow
     public Color tree5LeafColor = Color.green;
 
     // Alpha cutoff per tree type
-    public float tree1AlphaCutoff = 0.5f;
-    public float tree2AlphaCutoff = 0.5f;
-    public float tree3AlphaCutoff = 0.5f;
-    public float tree4AlphaCutoff = 0.5f;
-    public float tree5AlphaCutoff = 0.5f;
+    public float tree1AlphaCutoff = 0.0f;
+    public float tree2AlphaCutoff = 0.0f;
+    public float tree3AlphaCutoff = 0.0f;
+    public float tree4AlphaCutoff = 0.0f;
+    public float tree5AlphaCutoff = 0.0f;
 
     // Forest generation area
     public Vector2 forestSize = new Vector2(500, 500);
@@ -165,6 +165,7 @@ public class RandomForestMultiEditor : EditorWindow
         }
 
         EditorGUILayout.Space();
+        GUILayout.Label("increase alpha cutoff to remove branches from the trees", EditorStyles.boldLabel);
         GUILayout.Label("=== Tree 1 ===", EditorStyles.boldLabel);
         tree1 = (GameObject)EditorGUILayout.ObjectField("Prefab", tree1, typeof(GameObject), true);
         treeCount1 = EditorGUILayout.IntField("Count", treeCount1);
