@@ -21,7 +21,7 @@ public class RandomForestMultiEditor : EditorWindow
     public bool useSelectedObject = false;
 
     // Clustering settings
-    public bool useNaturalClustering = false;
+    public bool useNaturalClustering = true;
     public float clusterScale = 100f;
     public float clusterStrength = 0.7f;
 
@@ -42,6 +42,9 @@ public class RandomForestMultiEditor : EditorWindow
         public float alphaCutoff = 0.0f;
         public bool foldout = true;
         public bool ignoreLeafCheck = false; // Apply color to all materials
+        
+        // Color modification toggle
+        public bool changeLeafColors = false;
         
         // Optional material assignments
         public Material leafMaterial;
@@ -218,48 +221,65 @@ public class RandomForestMultiEditor : EditorWindow
                 treeSettings[i].slopeDensityFade = EditorGUILayout.Toggle("Fade Density on Slope", treeSettings[i].slopeDensityFade);
                 
                 EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Ignore Full Model", EditorStyles.boldLabel);
-                treeSettings[i].ignoreLeafCheck = EditorGUILayout.Toggle("Apply color to full model", treeSettings[i].ignoreLeafCheck);
+                treeSettings[i].alphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", treeSettings[i].alphaCutoff, 0, 1);
+                EditorGUILayout.HelpBox("Increase to remove branches/small details (works independently of color changes)", MessageType.None);
                 
-                if (!treeSettings[i].ignoreLeafCheck)
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Change Leaf Colors", EditorStyles.boldLabel);
+                treeSettings[i].changeLeafColors = EditorGUILayout.Toggle("Enable color modification", treeSettings[i].changeLeafColors);
+                
+                if (treeSettings[i].changeLeafColors)
                 {
-                    EditorGUILayout.HelpBox("Color will only be applied to leaves (trunks stay brown)", MessageType.Info);
+                    EditorGUI.indentLevel++;
+                    
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Ignore Full Model", EditorStyles.boldLabel);
+                    treeSettings[i].ignoreLeafCheck = EditorGUILayout.Toggle("Apply color to full model", treeSettings[i].ignoreLeafCheck);
+                    
+                    if (!treeSettings[i].ignoreLeafCheck)
+                    {
+                        EditorGUILayout.HelpBox("Color will only be applied to leaves (trunks stay brown)", MessageType.Info);
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox("Color will be applied to the ENTIRE model (including trunks)", MessageType.Warning);
+                    }
+                    
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField("Start Color", GUILayout.Width(80));
+                    GradientColorKey[] colorKeys = treeSettings[i].leafColorGradient.colorKeys;
+                    if (colorKeys.Length > 0)
+                    {
+                        Color newStartColor = EditorGUILayout.ColorField(colorKeys[0].color);
+                        if (newStartColor != colorKeys[0].color)
+                        {
+                            colorKeys[0].color = newStartColor;
+                            treeSettings[i].leafColorGradient.SetKeys(colorKeys, treeSettings[i].leafColorGradient.alphaKeys);
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
+                    
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField("End Color", GUILayout.Width(80));
+                    if (colorKeys.Length > 1)
+                    {
+                        Color newEndColor = EditorGUILayout.ColorField(colorKeys[1].color);
+                        if (newEndColor != colorKeys[1].color)
+                        {
+                            colorKeys[1].color = newEndColor;
+                            treeSettings[i].leafColorGradient.SetKeys(colorKeys, treeSettings[i].leafColorGradient.alphaKeys);
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
+                    
+                    EditorGUILayout.HelpBox("Each tree will randomly pick a color between Start and End Color", MessageType.None);
+                    
+                    EditorGUI.indentLevel--;
                 }
                 else
                 {
-                    EditorGUILayout.HelpBox("Color will be applied to the ENTIRE model (including trunks)", MessageType.Warning);
+                    EditorGUILayout.HelpBox("Original materials will be preserved without color changes", MessageType.Info);
                 }
-                
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Start Color", GUILayout.Width(80));
-                GradientColorKey[] colorKeys = treeSettings[i].leafColorGradient.colorKeys;
-                if (colorKeys.Length > 0)
-                {
-                    Color newStartColor = EditorGUILayout.ColorField(colorKeys[0].color);
-                    if (newStartColor != colorKeys[0].color)
-                    {
-                        colorKeys[0].color = newStartColor;
-                        treeSettings[i].leafColorGradient.SetKeys(colorKeys, treeSettings[i].leafColorGradient.alphaKeys);
-                    }
-                }
-                EditorGUILayout.EndHorizontal();
-                
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("End Color", GUILayout.Width(80));
-                if (colorKeys.Length > 1)
-                {
-                    Color newEndColor = EditorGUILayout.ColorField(colorKeys[1].color);
-                    if (newEndColor != colorKeys[1].color)
-                    {
-                        colorKeys[1].color = newEndColor;
-                        treeSettings[i].leafColorGradient.SetKeys(colorKeys, treeSettings[i].leafColorGradient.alphaKeys);
-                    }
-                }
-                EditorGUILayout.EndHorizontal();
-                
-                EditorGUILayout.HelpBox("Each tree will randomly pick a color between Start and End Color", MessageType.None);
-                
-                treeSettings[i].alphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", treeSettings[i].alphaCutoff, 0, 1);
                 
                 EditorGUI.indentLevel--;
             }
@@ -415,8 +435,14 @@ public class RandomForestMultiEditor : EditorWindow
             ApplyOptionalMaterials(instance, settings);
         }
 
-        // Second pass: Apply color modifications (only albedo)
-        ApplyColorToMaterials(instance, settings, leafColor);
+        // Second pass: Apply color modifications (only if changeLeafColors is enabled)
+        if (settings.changeLeafColors)
+        {
+            ApplyColorToMaterials(instance, settings, leafColor);
+        }
+        
+        // Third pass: Apply alpha cutoff (works independently of color changes)
+        ApplyAlphaCutoff(instance, settings);
 
         return instance;
     }
@@ -507,21 +533,46 @@ public class RandomForestMultiEditor : EditorWindow
                         {
                             newMat.SetColor("_MainColor", leafColor);
                         }
-                        
-                        // Apply alpha cutoff if the material supports it
-                        if (newMat.HasProperty("_Cutoff"))
-                        {
-                            newMat.SetFloat("_Cutoff", settings.alphaCutoff);
-                        }
 
                         sharedMats[i] = newMat;
                     }
-                    // If it's NOT a leaf material and we're NOT ignoring the check,
-                    // we simply don't touch it - it keeps its original material
                 }
             }
             
             rend.sharedMaterials = sharedMats;
+        }
+    }
+
+    // Apply alpha cutoff to all materials (independent of color changes)
+    void ApplyAlphaCutoff(GameObject instance, TreeSettings settings)
+    {
+        if (settings.alphaCutoff <= 0) return; // Skip if alpha cutoff is 0
+        
+        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
+        foreach (Renderer rend in renderers)
+        {
+            Material[] sharedMats = rend.sharedMaterials;
+            bool materialsChanged = false;
+
+            for (int i = 0; i < sharedMats.Length; i++)
+            {
+                if (sharedMats[i] != null && sharedMats[i].HasProperty("_Cutoff"))
+                {
+                    // Create new material instance if we haven't already
+                    if (sharedMats[i].GetFloat("_Cutoff") != settings.alphaCutoff)
+                    {
+                        Material newMat = new Material(sharedMats[i]);
+                        newMat.SetFloat("_Cutoff", settings.alphaCutoff);
+                        sharedMats[i] = newMat;
+                        materialsChanged = true;
+                    }
+                }
+            }
+            
+            if (materialsChanged)
+            {
+                rend.sharedMaterials = sharedMats;
+            }
         }
     }
 
