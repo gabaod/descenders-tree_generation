@@ -4,102 +4,83 @@ using System.Collections.Generic;
 
 public class RandomForestMultiEditor : EditorWindow
 {
-    [MenuItem("Tools/Create Random Forest Multi")] 
-    public static void ShowWindow() 
-    { 
-        GetWindow<RandomForestMultiEditor>("Random Forest"); 
+    [MenuItem("Tools/Create Random Forest Multi")]
+    public static void ShowWindow()
+    {
+        GetWindow<RandomForestMultiEditor>("Random Forest");
     }
 
-    // Tree prefabs
-    public GameObject tree1;
-    public GameObject tree2;
-    public GameObject tree3;
-    public GameObject tree4;
-    public GameObject tree5;
-
-    // Tree counts
-    public int treeCount1 = 20;
-    public int treeCount2 = 20;
-    public int treeCount3 = 20;
-    public int treeCount4 = 20;
-    public int treeCount5 = 20;
-
-    // Scale settings per tree
-    public float minScale1 = 2f;
-    public float maxScale1 = 3.5f;
-    public float minScale2 = 2f;
-    public float maxScale2 = 3.5f;
-    public float minScale3 = 2f;
-    public float maxScale3 = 3.5f;
-    public float minScale4 = 2f;
-    public float maxScale4 = 3.5f;
-    public float minScale5 = 2f;
-    public float maxScale5 = 3.5f;
-
-    // Slope settings per tree
-    public float maxSlope1 = 40f;
-    public bool slopeDensityFade1 = true;
-    public float maxSlope2 = 40f;
-    public bool slopeDensityFade2 = true;
-    public float maxSlope3 = 40f;
-    public bool slopeDensityFade3 = true;
-    public float maxSlope4 = 40f;
-    public bool slopeDensityFade4 = true;
-    public float maxSlope5 = 40f;
-    public bool slopeDensityFade5 = true;
-
-    // Colors
-    public Color tree1LeafColor = Color.green;
-    public Color tree2LeafColor = Color.green;
-    public Color tree3LeafColor = Color.green;
-    public Color tree4LeafColor = Color.green;
-    public Color tree5LeafColor = Color.green;
-
-    // Alpha cutoff per tree type
-    public float tree1AlphaCutoff = 0.0f;
-    public float tree2AlphaCutoff = 0.0f;
-    public float tree3AlphaCutoff = 0.0f;
-    public float tree4AlphaCutoff = 0.0f;
-    public float tree5AlphaCutoff = 0.0f;
+    // Dynamic tree list
+    private List<TreeSettings> treeSettings = new List<TreeSettings>();
 
     // Forest generation area
     public Vector2 forestSize = new Vector2(500, 500);
     public Terrain targetTerrain;
-    
+
     // Center point options
     public bool useSelectedObject = false;
+
+    // Clustering settings
+    public bool useNaturalClustering = false;
+    public float clusterScale = 100f;
+    public float clusterStrength = 0.7f;
 
     private GameObject forestParent;
     private Vector2 scrollPos;
 
-    // Helper class for tree data
-    private class TreeData
+    // Tree settings class
+    [System.Serializable]
+    private class TreeSettings
     {
         public GameObject prefab;
-        public int count;
-        public float minScale;
-        public float maxScale;
-        public float maxSlope;
-        public bool slopeDensityFade;
-        public Color leafColor;
-        public float alphaCutoff;
+        public int count = 20;
+        public float minScale = 2f;
+        public float maxScale = 3.5f;
+        public float maxSlope = 40f;
+        public bool slopeDensityFade = true;
+        public Gradient leafColorGradient;
+        public float alphaCutoff = 0.0f;
+        public bool foldout = true;
+        public bool ignoreLeafCheck = false; // Apply color to all materials
+        
+        // Optional material assignments
+        public Material leafMaterial;
+        public Material branchMaterial;
+        public Material trunkMaterial;
+        
+        // Rotation settings
+        public bool randomRotationX = false;
+        public float minRotationX = 0f;
+        public float maxRotationX = 0f;
+        public bool randomRotationZ = false;
+        public float minRotationZ = 0f;
+        public float maxRotationZ = 0f;
 
-        public TreeData(GameObject prefab, int count, float minScale, float maxScale, float maxSlope, bool slopeDensityFade, Color leafColor, float alphaCutoff)
+        public TreeSettings()
         {
-            this.prefab = prefab;
-            this.count = count;
-            this.minScale = minScale;
-            this.maxScale = maxScale;
-            this.maxSlope = maxSlope;
-            this.slopeDensityFade = slopeDensityFade;
-            this.leafColor = leafColor;
-            this.alphaCutoff = alphaCutoff;
+            // Initialize with a default green gradient
+            leafColorGradient = new Gradient();
+            GradientColorKey[] colorKeys = new GradientColorKey[2];
+            colorKeys[0] = new GradientColorKey(new Color(0.2f, 0.6f, 0.2f), 0.0f);
+            colorKeys[1] = new GradientColorKey(new Color(0.4f, 0.8f, 0.3f), 1.0f);
+            
+            GradientAlphaKey[] alphaKeys = new GradientAlphaKey[2];
+            alphaKeys[0] = new GradientAlphaKey(1.0f, 0.0f);
+            alphaKeys[1] = new GradientAlphaKey(1.0f, 1.0f);
+            
+            leafColorGradient.SetKeys(colorKeys, alphaKeys);
         }
     }
 
     void OnEnable()
     {
         SceneView.onSceneGUIDelegate += OnSceneGUI;
+        
+        // Initialize with one tree slot if empty
+        if (treeSettings.Count == 0)
+        {
+            treeSettings.Add(new TreeSettings());
+        }
     }
 
     void OnDisable()
@@ -118,19 +99,16 @@ public class RandomForestMultiEditor : EditorWindow
         }
         else
         {
-            generationCenter = targetTerrain.transform.position + new Vector3(targetTerrain.terrainData.size.x/2f, 0, targetTerrain.terrainData.size.z/2f);
+            generationCenter = targetTerrain.transform.position + new Vector3(targetTerrain.terrainData.size.x / 2f, 0, targetTerrain.terrainData.size.z / 2f);
         }
 
-        // Sample terrain height at center and adjust Y position
         float terrainHeight = targetTerrain.SampleHeight(generationCenter) + targetTerrain.transform.position.y;
         generationCenter.y = terrainHeight;
 
-        // Draw wireframe box showing generation area
         Handles.color = Color.yellow;
         Vector3 size = new Vector3(forestSize.x, 100f, forestSize.y);
         Handles.DrawWireCube(generationCenter, size);
 
-        // Draw corner markers
         float halfX = forestSize.x / 2f;
         float halfZ = forestSize.y / 2f;
         Handles.color = Color.red;
@@ -139,7 +117,6 @@ public class RandomForestMultiEditor : EditorWindow
         Handles.SphereHandleCap(0, generationCenter + new Vector3(halfX, 0, -halfZ), Quaternion.identity, 5f, EventType.Repaint);
         Handles.SphereHandleCap(0, generationCenter + new Vector3(-halfX, 0, -halfZ), Quaternion.identity, 5f, EventType.Repaint);
 
-        // Draw label
         Handles.Label(generationCenter + new Vector3(0, 50f, 0), "Forest Generation Area\n" + forestSize.x + " x " + forestSize.y);
     }
 
@@ -149,7 +126,7 @@ public class RandomForestMultiEditor : EditorWindow
 
         targetTerrain = (Terrain)EditorGUILayout.ObjectField("Target Terrain", targetTerrain, typeof(Terrain), true);
         forestSize = EditorGUILayout.Vector2Field("Forest Size (X,Z)", forestSize);
-        
+
         EditorGUILayout.Space();
         useSelectedObject = EditorGUILayout.Toggle("Use Selected Object as Center", useSelectedObject);
         if (useSelectedObject)
@@ -165,60 +142,137 @@ public class RandomForestMultiEditor : EditorWindow
         }
 
         EditorGUILayout.Space();
-        GUILayout.Label("increase alpha cutoff to remove branches from the trees", EditorStyles.boldLabel);
-        GUILayout.Label("=== Tree 1 ===", EditorStyles.boldLabel);
-        tree1 = (GameObject)EditorGUILayout.ObjectField("Prefab", tree1, typeof(GameObject), true);
-        treeCount1 = EditorGUILayout.IntField("Count", treeCount1);
-        minScale1 = EditorGUILayout.FloatField("Min Scale", minScale1);
-        maxScale1 = EditorGUILayout.FloatField("Max Scale", maxScale1);
-        maxSlope1 = EditorGUILayout.FloatField("Max Slope", maxSlope1);
-        slopeDensityFade1 = EditorGUILayout.Toggle("Fade Density on Slope", slopeDensityFade1);
-        tree1LeafColor = EditorGUILayout.ColorField("Leaf Color", tree1LeafColor);
-        tree1AlphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", tree1AlphaCutoff, 0, 1);
+        GUILayout.Label("=== Clustering Settings ===", EditorStyles.boldLabel);
+        useNaturalClustering = EditorGUILayout.Toggle("Natural Clustering", useNaturalClustering);
+        if (useNaturalClustering)
+        {
+            EditorGUILayout.HelpBox("Creates natural patches where similar trees group together.", MessageType.Info);
+            clusterScale = EditorGUILayout.Slider("Cluster Size", clusterScale, 30f, 300f);
+            clusterStrength = EditorGUILayout.Slider("Cluster Strength", clusterStrength, 0f, 0.95f);
+        }
 
         EditorGUILayout.Space();
-        GUILayout.Label("=== Tree 2 ===", EditorStyles.boldLabel);
-        tree2 = (GameObject)EditorGUILayout.ObjectField("Prefab", tree2, typeof(GameObject), true);
-        treeCount2 = EditorGUILayout.IntField("Count", treeCount2);
-        minScale2 = EditorGUILayout.FloatField("Min Scale", minScale2);
-        maxScale2 = EditorGUILayout.FloatField("Max Scale", maxScale2);
-        maxSlope2 = EditorGUILayout.FloatField("Max Slope", maxSlope2);
-        slopeDensityFade2 = EditorGUILayout.Toggle("Fade Density on Slope", slopeDensityFade2);
-        tree2LeafColor = EditorGUILayout.ColorField("Leaf Color", tree2LeafColor);
-        tree2AlphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", tree2AlphaCutoff, 0, 1);
+        GUILayout.Label("=== Tree Types ===", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox("Gradient colors will be randomly sampled for each tree. Increase alpha cutoff to remove branches.", MessageType.Info);
 
-        EditorGUILayout.Space();
-        GUILayout.Label("=== Tree 3 ===", EditorStyles.boldLabel);
-        tree3 = (GameObject)EditorGUILayout.ObjectField("Prefab", tree3, typeof(GameObject), true);
-        treeCount3 = EditorGUILayout.IntField("Count", treeCount3);
-        minScale3 = EditorGUILayout.FloatField("Min Scale", minScale3);
-        maxScale3 = EditorGUILayout.FloatField("Max Scale", maxScale3);
-        maxSlope3 = EditorGUILayout.FloatField("Max Slope", maxSlope3);
-        slopeDensityFade3 = EditorGUILayout.Toggle("Fade Density on Slope", slopeDensityFade3);
-        tree3LeafColor = EditorGUILayout.ColorField("Leaf Color", tree3LeafColor);
-        tree3AlphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", tree3AlphaCutoff, 0, 1);
+        // Display all tree settings
+        for (int i = 0; i < treeSettings.Count; i++)
+        {
+            EditorGUILayout.BeginVertical("box");
+            
+            EditorGUILayout.BeginHorizontal();
+            treeSettings[i].foldout = EditorGUILayout.Foldout(treeSettings[i].foldout, "Tree Type " + (i + 1), true);
+            
+            if (GUILayout.Button("Remove", GUILayout.Width(70)))
+            {
+                treeSettings.RemoveAt(i);
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.EndVertical();
+                break;
+            }
+            EditorGUILayout.EndHorizontal();
 
-        EditorGUILayout.Space();
-        GUILayout.Label("=== Tree 4 ===", EditorStyles.boldLabel);
-        tree4 = (GameObject)EditorGUILayout.ObjectField("Prefab", tree4, typeof(GameObject), true);
-        treeCount4 = EditorGUILayout.IntField("Count", treeCount4);
-        minScale4 = EditorGUILayout.FloatField("Min Scale", minScale4);
-        maxScale4 = EditorGUILayout.FloatField("Max Scale", maxScale4);
-        maxSlope4 = EditorGUILayout.FloatField("Max Slope", maxSlope4);
-        slopeDensityFade4 = EditorGUILayout.Toggle("Fade Density on Slope", slopeDensityFade4);
-        tree4LeafColor = EditorGUILayout.ColorField("Leaf Color", tree4LeafColor);
-        tree4AlphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", tree4AlphaCutoff, 0, 1);
+            if (treeSettings[i].foldout)
+            {
+                EditorGUI.indentLevel++;
+                
+                treeSettings[i].prefab = (GameObject)EditorGUILayout.ObjectField("Prefab", treeSettings[i].prefab, typeof(GameObject), true);
+                
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Optional Material Assignments", EditorStyles.boldLabel);
+                EditorGUILayout.HelpBox("Assign materials here if your model needs specific materials before generation. Leave empty to use prefab's materials.", MessageType.Info);
+                treeSettings[i].leafMaterial = (Material)EditorGUILayout.ObjectField("Leaf Material", treeSettings[i].leafMaterial, typeof(Material), false);
+                treeSettings[i].branchMaterial = (Material)EditorGUILayout.ObjectField("Branch Material", treeSettings[i].branchMaterial, typeof(Material), false);
+                treeSettings[i].trunkMaterial = (Material)EditorGUILayout.ObjectField("Trunk Material", treeSettings[i].trunkMaterial, typeof(Material), false);
+                
+                EditorGUILayout.Space();
+                treeSettings[i].count = EditorGUILayout.IntField("Count", treeSettings[i].count);
+                treeSettings[i].minScale = EditorGUILayout.FloatField("Min Scale", treeSettings[i].minScale);
+                treeSettings[i].maxScale = EditorGUILayout.FloatField("Max Scale", treeSettings[i].maxScale);
+                
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Rotation Settings", EditorStyles.boldLabel);
+                
+                treeSettings[i].randomRotationX = EditorGUILayout.Toggle("Random X Rotation", treeSettings[i].randomRotationX);
+                if (treeSettings[i].randomRotationX)
+                {
+                    EditorGUI.indentLevel++;
+                    treeSettings[i].minRotationX = EditorGUILayout.FloatField("Min X Angle", treeSettings[i].minRotationX);
+                    treeSettings[i].maxRotationX = EditorGUILayout.FloatField("Max X Angle", treeSettings[i].maxRotationX);
+                    EditorGUI.indentLevel--;
+                }
+                
+                treeSettings[i].randomRotationZ = EditorGUILayout.Toggle("Random Z Rotation", treeSettings[i].randomRotationZ);
+                if (treeSettings[i].randomRotationZ)
+                {
+                    EditorGUI.indentLevel++;
+                    treeSettings[i].minRotationZ = EditorGUILayout.FloatField("Min Z Angle", treeSettings[i].minRotationZ);
+                    treeSettings[i].maxRotationZ = EditorGUILayout.FloatField("Max Z Angle", treeSettings[i].maxRotationZ);
+                    EditorGUI.indentLevel--;
+                }
+                
+                EditorGUILayout.HelpBox("Y rotation is always random (0-360°). X and Z can tilt/lean the tree.", MessageType.None);
+                
+                EditorGUILayout.Space();
+                treeSettings[i].maxSlope = EditorGUILayout.FloatField("Max Slope", treeSettings[i].maxSlope);
+                treeSettings[i].slopeDensityFade = EditorGUILayout.Toggle("Fade Density on Slope", treeSettings[i].slopeDensityFade);
+                
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Ignore Full Model", EditorStyles.boldLabel);
+                treeSettings[i].ignoreLeafCheck = EditorGUILayout.Toggle("Apply color to full model", treeSettings[i].ignoreLeafCheck);
+                
+                if (!treeSettings[i].ignoreLeafCheck)
+                {
+                    EditorGUILayout.HelpBox("Color will only be applied to leaves (trunks stay brown)", MessageType.Info);
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox("Color will be applied to the ENTIRE model (including trunks)", MessageType.Warning);
+                }
+                
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Start Color", GUILayout.Width(80));
+                GradientColorKey[] colorKeys = treeSettings[i].leafColorGradient.colorKeys;
+                if (colorKeys.Length > 0)
+                {
+                    Color newStartColor = EditorGUILayout.ColorField(colorKeys[0].color);
+                    if (newStartColor != colorKeys[0].color)
+                    {
+                        colorKeys[0].color = newStartColor;
+                        treeSettings[i].leafColorGradient.SetKeys(colorKeys, treeSettings[i].leafColorGradient.alphaKeys);
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+                
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("End Color", GUILayout.Width(80));
+                if (colorKeys.Length > 1)
+                {
+                    Color newEndColor = EditorGUILayout.ColorField(colorKeys[1].color);
+                    if (newEndColor != colorKeys[1].color)
+                    {
+                        colorKeys[1].color = newEndColor;
+                        treeSettings[i].leafColorGradient.SetKeys(colorKeys, treeSettings[i].leafColorGradient.alphaKeys);
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+                
+                EditorGUILayout.HelpBox("Each tree will randomly pick a color between Start and End Color", MessageType.None);
+                
+                treeSettings[i].alphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", treeSettings[i].alphaCutoff, 0, 1);
+                
+                EditorGUI.indentLevel--;
+            }
 
-        EditorGUILayout.Space();
-        GUILayout.Label("=== Tree 5 ===", EditorStyles.boldLabel);
-        tree5 = (GameObject)EditorGUILayout.ObjectField("Prefab", tree5, typeof(GameObject), true);
-        treeCount5 = EditorGUILayout.IntField("Count", treeCount5);
-        minScale5 = EditorGUILayout.FloatField("Min Scale", minScale5);
-        maxScale5 = EditorGUILayout.FloatField("Max Scale", maxScale5);
-        maxSlope5 = EditorGUILayout.FloatField("Max Slope", maxSlope5);
-        slopeDensityFade5 = EditorGUILayout.Toggle("Fade Density on Slope", slopeDensityFade5);
-        tree5LeafColor = EditorGUILayout.ColorField("Leaf Color", tree5LeafColor);
-        tree5AlphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", tree5AlphaCutoff, 0, 1);
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space();
+        }
+
+        // Add new tree button
+        if (GUILayout.Button("+ Add Tree Type", GUILayout.Height(25)))
+        {
+            treeSettings.Add(new TreeSettings());
+        }
 
         EditorGUILayout.Space();
         if (GUILayout.Button("Generate Forest", GUILayout.Height(30)))
@@ -237,16 +291,8 @@ public class RandomForestMultiEditor : EditorWindow
             return;
         }
 
-        // Always create a new parent object with timestamp
         string timestamp = System.DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss");
         forestParent = new GameObject("Generated Forest " + timestamp);
-
-        List<TreeData> trees = new List<TreeData>();
-        trees.Add(new TreeData(tree1, treeCount1, minScale1, maxScale1, maxSlope1, slopeDensityFade1, tree1LeafColor, tree1AlphaCutoff));
-        trees.Add(new TreeData(tree2, treeCount2, minScale2, maxScale2, maxSlope2, slopeDensityFade2, tree2LeafColor, tree2AlphaCutoff));
-        trees.Add(new TreeData(tree3, treeCount3, minScale3, maxScale3, maxSlope3, slopeDensityFade3, tree3LeafColor, tree3AlphaCutoff));
-        trees.Add(new TreeData(tree4, treeCount4, minScale4, maxScale4, maxSlope4, slopeDensityFade4, tree4LeafColor, tree4AlphaCutoff));
-        trees.Add(new TreeData(tree5, treeCount5, minScale5, maxScale5, maxSlope5, slopeDensityFade5, tree5LeafColor, tree5AlphaCutoff));
 
         Vector3 generationCenter;
         if (useSelectedObject && Selection.activeGameObject != null)
@@ -255,24 +301,34 @@ public class RandomForestMultiEditor : EditorWindow
         }
         else
         {
-            generationCenter = targetTerrain.transform.position + new Vector3(targetTerrain.terrainData.size.x/2f, 0, targetTerrain.terrainData.size.z/2f);
+            generationCenter = targetTerrain.transform.position + new Vector3(targetTerrain.terrainData.size.x / 2f, 0, targetTerrain.terrainData.size.z / 2f);
         }
 
-        foreach (TreeData treeData in trees)
+        float noiseOffsetX = Random.Range(0f, 10000f);
+        float noiseOffsetZ = Random.Range(0f, 10000f);
+
+        int totalPlaced = 0;
+        int totalExpected = 0;
+
+        for (int treeIndex = 0; treeIndex < treeSettings.Count; treeIndex++)
         {
-            if (treeData.prefab == null || treeData.count <= 0) 
+            TreeSettings settings = treeSettings[treeIndex];
+            
+            if (settings.prefab == null || settings.count <= 0)
             {
                 continue;
             }
-            
+
+            totalExpected += settings.count;
+
             int attempts = 0;
             int placed = 0;
 
-            while (placed < treeData.count && attempts < treeData.count * 10)
+            while (placed < settings.count && attempts < settings.count * 10)
             {
                 attempts++;
-                float x = Random.Range(-forestSize.x/2f, forestSize.x/2f);
-                float z = Random.Range(-forestSize.y/2f, forestSize.y/2f);
+                float x = Random.Range(-forestSize.x / 2f, forestSize.x / 2f);
+                float z = Random.Range(-forestSize.y / 2f, forestSize.y / 2f);
                 Vector3 pos = generationCenter + new Vector3(x, 0, z);
 
                 float terrainHeight = targetTerrain.SampleHeight(pos) + targetTerrain.transform.position.y;
@@ -283,92 +339,237 @@ public class RandomForestMultiEditor : EditorWindow
                 Vector3 normal = targetTerrain.terrainData.GetInterpolatedNormal(normalizedX, normalizedZ);
                 float slope = Vector3.Angle(Vector3.up, normal);
 
-                if (slope > treeData.maxSlope) 
+                if (slope > settings.maxSlope)
                 {
                     continue;
                 }
 
                 float densityMultiplier = 1f;
-                if (treeData.slopeDensityFade && slope > 0)
+                if (settings.slopeDensityFade && slope > 0)
                 {
-                    densityMultiplier = 1f - (slope / treeData.maxSlope);
+                    densityMultiplier = 1f - (slope / settings.maxSlope);
                 }
+
+                if (useNaturalClustering)
+                {
+                    float noiseValue = GetClusteringNoise(pos.x, pos.z, treeIndex, noiseOffsetX, noiseOffsetZ);
+                    float boostedNoise = Mathf.Pow(noiseValue, 0.7f);
+                    float clusterMultiplier = Mathf.Lerp(1f, boostedNoise * 1.5f, clusterStrength);
+                    densityMultiplier *= clusterMultiplier;
+                }
+
                 if (Random.value > densityMultiplier)
                 {
                     continue;
                 }
 
-                GameObject instance;
-                
-                // Check if it's a prefab or scene object
-                if (PrefabUtility.GetPrefabType(treeData.prefab) != PrefabType.None)
+                GameObject instance = InstantiateTree(settings, pos, normal);
+                if (instance != null)
                 {
-                    // It's a prefab
-                    instance = (GameObject)PrefabUtility.InstantiatePrefab(treeData.prefab);
+                    instance.transform.parent = forestParent.transform;
+                    placed++;
+                    totalPlaced++;
                 }
-                else
-                {
-                    // It's a scene object, instantiate normally
-                    instance = (GameObject)Instantiate(treeData.prefab);
-                }
-                
-                instance.transform.position = pos;
-                instance.transform.rotation = Quaternion.FromToRotation(Vector3.up, normal) * Quaternion.Euler(0, Random.Range(0, 360), 0);
-                float scale = Random.Range(treeData.minScale, treeData.maxScale);
-                instance.transform.localScale = Vector3.one * scale;
-                instance.transform.parent = forestParent.transform;
-
-                // Apply material properties by creating material instances
-                Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
-                for (int r = 0; r < renderers.Length; r++)
-                {
-                    Renderer rend = renderers[r];
-                    Material[] sharedMats = rend.sharedMaterials;
-                    
-                    for (int i = 0; i < sharedMats.Length; i++)
-                    {
-                        if (sharedMats[i] != null)
-                        {
-                            // Create a new material instance
-                            Material newMat = new Material(sharedMats[i]);
-                            
-                            // Try multiple common color properties
-                            if (newMat.HasProperty("_Color"))
-                            {
-                                newMat.color = treeData.leafColor;
-                            }
-                            if (newMat.HasProperty("_MainColor"))
-                            {
-                                newMat.SetColor("_MainColor", treeData.leafColor);
-                            }
-                            if (newMat.HasProperty("_TintColor"))
-                            {
-                                newMat.SetColor("_TintColor", treeData.leafColor);
-                            }
-                            if (newMat.HasProperty("_HueVariation"))
-                            {
-                                // For Nature shaders, HueVariation is often RGBA where RGB is the color and A is strength
-                                Color hueVar = treeData.leafColor;
-                                hueVar.a = 0.5f; // 50% blend strength
-                                newMat.SetColor("_HueVariation", hueVar);
-                            }
-                            if (newMat.HasProperty("_Cutoff"))
-                            {
-                                newMat.SetFloat("_Cutoff", treeData.alphaCutoff);
-                            }
-                            
-                            // Create a temporary array to replace just this material
-                            Material[] tempMats = rend.sharedMaterials;
-                            tempMats[i] = newMat;
-                            rend.sharedMaterials = tempMats;
-                        }
-                    }
-                }
-
-                placed++;
             }
         }
 
-        Debug.Log("Forest generation complete.");
+        Debug.Log("Forest generation complete. Placed " + totalPlaced + "/" + totalExpected + " trees.");
+    }
+
+    GameObject InstantiateTree(TreeSettings settings, Vector3 pos, Vector3 normal)
+    {
+        GameObject instance;
+
+        if (PrefabUtility.GetPrefabType(settings.prefab) != PrefabType.None)
+        {
+            instance = (GameObject)PrefabUtility.InstantiatePrefab(settings.prefab);
+        }
+        else
+        {
+            instance = (GameObject)Instantiate(settings.prefab);
+        }
+
+        instance.transform.position = pos;
+        
+        // Calculate rotation
+        // Start with terrain normal alignment, then apply random Y rotation
+        Quaternion baseRotation = Quaternion.FromToRotation(Vector3.up, normal) * Quaternion.Euler(0, Random.Range(0, 360), 0);
+        
+        // Add optional X and Z rotations
+        float rotX = settings.randomRotationX ? Random.Range(settings.minRotationX, settings.maxRotationX) : 0f;
+        float rotZ = settings.randomRotationZ ? Random.Range(settings.minRotationZ, settings.maxRotationZ) : 0f;
+        
+        // Apply additional rotations
+        Quaternion additionalRotation = Quaternion.Euler(rotX, 0, rotZ);
+        instance.transform.rotation = baseRotation * additionalRotation;
+        
+        float scale = Random.Range(settings.minScale, settings.maxScale);
+        instance.transform.localScale = Vector3.one * scale;
+
+        // Sample a random color from the gradient
+        Color leafColor = settings.leafColorGradient.Evaluate(Random.Range(0f, 1f));
+
+        // First pass: Apply optional material assignments if provided
+        if (settings.leafMaterial != null || settings.branchMaterial != null || settings.trunkMaterial != null)
+        {
+            ApplyOptionalMaterials(instance, settings);
+        }
+
+        // Second pass: Apply color modifications (only albedo)
+        ApplyColorToMaterials(instance, settings, leafColor);
+
+        return instance;
+    }
+
+    // Apply optional material assignments based on material names
+    void ApplyOptionalMaterials(GameObject instance, TreeSettings settings)
+    {
+        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
+        foreach (Renderer rend in renderers)
+        {
+            Material[] sharedMats = rend.sharedMaterials;
+            bool materialsChanged = false;
+
+            for (int i = 0; i < sharedMats.Length; i++)
+            {
+                if (sharedMats[i] != null)
+                {
+                    string matName = sharedMats[i].name.ToLower();
+                    Material replacementMat = null;
+
+                    // Check if this material should be replaced with a custom one
+                    if (settings.leafMaterial != null && 
+                        (matName.Contains("leaf") || matName.Contains("leaves") || 
+                         matName.Contains("foliage") || matName.Contains("canopy")))
+                    {
+                        replacementMat = settings.leafMaterial;
+                    }
+                    else if (settings.branchMaterial != null && 
+                             (matName.Contains("branch") || matName.Contains("twig")))
+                    {
+                        replacementMat = settings.branchMaterial;
+                    }
+                    else if (settings.trunkMaterial != null && 
+                             (matName.Contains("trunk") || matName.Contains("bark") || 
+                              matName.Contains("stem") || matName.Contains("wood")))
+                    {
+                        replacementMat = settings.trunkMaterial;
+                    }
+
+                    if (replacementMat != null)
+                    {
+                        sharedMats[i] = new Material(replacementMat);
+                        materialsChanged = true;
+                    }
+                }
+            }
+
+            if (materialsChanged)
+            {
+                rend.sharedMaterials = sharedMats;
+            }
+        }
+    }
+
+    // Apply color modifications to materials (only modifying albedo/base color)
+    void ApplyColorToMaterials(GameObject instance, TreeSettings settings, Color leafColor)
+    {
+        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
+        foreach (Renderer rend in renderers)
+        {
+            Material[] sharedMats = rend.sharedMaterials;
+
+            for (int i = 0; i < sharedMats.Length; i++)
+            {
+                if (sharedMats[i] != null)
+                {
+                    // Check if this specific material is a leaf material
+                    bool isLeafMaterial = IsLeafMaterial(sharedMats[i]);
+                    
+                    // Only modify the material if:
+                    // 1. It's a leaf material, OR
+                    // 2. We're ignoring the leaf check (apply to all)
+                    if (isLeafMaterial || settings.ignoreLeafCheck)
+                    {
+                        // Create a new material instance to avoid modifying the shared material
+                        Material newMat = new Material(sharedMats[i]);
+
+                        // Only modify albedo/base color properties - nothing else
+                        if (newMat.HasProperty("_Color"))
+                        {
+                            newMat.SetColor("_Color", leafColor);
+                        }
+                        if (newMat.HasProperty("_BaseColor"))
+                        {
+                            newMat.SetColor("_BaseColor", leafColor);
+                        }
+                        if (newMat.HasProperty("_MainColor"))
+                        {
+                            newMat.SetColor("_MainColor", leafColor);
+                        }
+                        
+                        // Apply alpha cutoff if the material supports it
+                        if (newMat.HasProperty("_Cutoff"))
+                        {
+                            newMat.SetFloat("_Cutoff", settings.alphaCutoff);
+                        }
+
+                        sharedMats[i] = newMat;
+                    }
+                    // If it's NOT a leaf material and we're NOT ignoring the check,
+                    // we simply don't touch it - it keeps its original material
+                }
+            }
+            
+            rend.sharedMaterials = sharedMats;
+        }
+    }
+
+    // Helper function to determine if a material is a leaf material
+    bool IsLeafMaterial(Material material)
+    {
+        if (material == null)
+            return false;
+            
+        string matName = material.name.ToLower();
+        
+        // Check for leaf keywords
+        if (matName.Contains("leaf") || matName.Contains("leaves") || 
+            matName.Contains("foliage") || matName.Contains("canopy"))
+        {
+            return true;
+        }
+        
+        // Check for trunk/bark keywords - explicitly exclude these
+        if (matName.Contains("trunk") || matName.Contains("bark") || 
+            matName.Contains("wood") || matName.Contains("stem"))
+        {
+            return false;
+        }
+
+        // Default: assume it's NOT a leaf material if we can't determine
+        // This is safer - it won't accidentally color bark materials
+        return false;
+    }
+
+    float GetClusteringNoise(float worldX, float worldZ, int treeIndex, float offsetX, float offsetZ)
+    {
+        float treeOffset = treeIndex * 7777f;
+
+        float noiseX = (worldX + offsetX + treeOffset) / clusterScale;
+        float noiseZ = (worldZ + offsetZ + treeOffset) / clusterScale;
+        float noiseValue = Mathf.PerlinNoise(noiseX, noiseZ);
+
+        float noiseX2 = (worldX + offsetX + treeOffset * 1.7f) / (clusterScale * 0.5f);
+        float noiseZ2 = (worldZ + offsetZ + treeOffset * 1.7f) / (clusterScale * 0.5f);
+        float noiseValue2 = Mathf.PerlinNoise(noiseX2, noiseZ2);
+
+        float noiseX3 = (worldX + offsetX + treeOffset * 2.3f) / (clusterScale * 0.25f);
+        float noiseZ3 = (worldZ + offsetZ + treeOffset * 2.3f) / (clusterScale * 0.25f);
+        float noiseValue3 = Mathf.PerlinNoise(noiseX3, noiseZ3);
+
+        noiseValue = noiseValue * 0.5f + noiseValue2 * 0.3f + noiseValue3 * 0.2f;
+
+        return noiseValue;
     }
 }
