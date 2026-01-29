@@ -12,4 +12,6 @@ Can also have trees be different scales
 4. drag your tree prefabs into prefab spot
 5. customize settings per tree/bush most trees are not above a 40 degree slope
    and most bushes arent above a 60 degree slope in the real world
-6. Hit generate and enjoy!
+6. Hit generate and enjoy!<br><br><br>
+
+Here is a tutorial  https://www.youtube.com/watch?v=SpcwyXPHBXw
